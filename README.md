@@ -1,21 +1,14 @@
 # Overmind
 
-**TODO: Add description**
+Multinode, persistent, consistent, scalable, named virtual actors.
 
-## Installation
+## Motivation
 
-If [available in Hex](https://hex.pm/docs/publish), the package can be installed
-by adding `overmind` to your list of dependencies in `mix.exs`:
+TODO
 
-```elixir
-def deps do
-  [
-    {:overmind, "~> 0.1.0"}
-  ]
-end
-```
+## Inspirations
 
-Documentation can be generated with [ExDoc](https://github.com/elixir-lang/ex_doc)
-and published on [HexDocs](https://hexdocs.pm). Once published, the docs can
-be found at [https://hexdocs.pm/overmind](https://hexdocs.pm/overmind).
-
+- [riak core](https://github.com/Kyorai/riak_core)
+- @myobie's [zk_registry](https://github.com/myobie/zk_registry) and his talk at CodeBeam STO
+- @CrowdHailer, his musings on pure actors and his work on [pachyderm](https://github.com/CrowdHailer/event-sourcing.elixir)
+- [erleans](https://github.com/SpaceTime-IoT/erleans)

@@ -3,6 +3,22 @@ defmodule Overmind.Coordinator do
 
   use GenStateMachine
 
+  @moduledoc """
+  `Overmind.Coordinator` is here to track the current node's participation
+  status in the ring and, as a result, potential locations of virtual actors.
+
+  It will:
+  - hold the pid of ZK client for other modules to use
+  - track ZK connection status
+  - track which nodes participate in the ring
+  - connect and monitor other nodes
+  - register the current node in the ring as well
+  - notify others when ring composition changes
+
+  This seems like a lot, it might be worth thinking about breaking it into more
+  single-responsibility pieces.
+  """
+
   @type state :: :disconnected | :connected | :participating
 
   defstruct [
