@@ -1,3 +1,2 @@
 defmodule HashRingTest do
-  
 end

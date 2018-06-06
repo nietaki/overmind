@@ -14,7 +14,7 @@ defmodule Overmind.MixProject do
   # Run "mix help compile.app" to learn about applications.
   def application do
     [
-      extra_applications: [:logger, :libring],
+      extra_applications: [:logger, :libring, :erlzk],
       mod: {Overmind.Application, []}
     ]
   end
@@ -22,14 +22,15 @@ defmodule Overmind.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:zookeeper, github: "vishnevskiy/zookeeper-elixir"},
+      {:erlzk, "~> 0.6.4"},
       {:libring, "~> 1.0"},
-
+      {:gen_state_machine, "~> 2.0"},
       {:stream_data, "~> 0.4.2", only: :test},
+
       # test/housekeeping stuff
       {:excoveralls, "~> 0.4", only: :test},
       {:ex_doc, "~> 0.18.1", only: :dev},
-      {:mix_test_watch, "~> 0.5", only: :dev, runtime: false},
+      {:mix_test_watch, "~> 0.5", only: :dev, runtime: false}
     ]
   end
 end
