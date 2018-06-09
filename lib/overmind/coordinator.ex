@@ -4,22 +4,56 @@ defmodule Overmind.Coordinator do
   use GenStateMachine
 
   @moduledoc """
-  `Overmind.Coordinator` is here to track the current node's participation
-  status in the ring and, as a result, potential locations of virtual actors.
+  What `#{__MODULE__}` does:
+  - holds the pid of ZK client for other modules to use (I don't think you can
+    register a monitor for it retrospectively)
+  - tracks ZK connection status
+  - registers the current node as available
+  - watches the current cluster members and the pending cluster members to
+    announce it to the node's workers
+  - tries to become a leader, is a follower otherwise
+  - if the leader, tracks the nodes' readiness to follow the pending_cluster
+    structure and switches it out as the current_cluster once everyone's ready
 
-  It will:
-  - hold the pid of ZK client for other modules to use
-  - track ZK connection status
-  - track which nodes participate in the ring
-  - connect and monitor other nodes
-  - register the current node in the ring as well
-  - notify others when ring composition changes
+  All coordination is done through Zookeeper.
 
-  This seems like a lot, it might be worth thinking about breaking it into more
-  single-responsibility pieces.
+  Here's an example situation showing which zookeeper paths we're using.
+  (All are under chroot):
+
+      /available_nodes # normal znode, generated as part of setup
+      /available_nodes/foo@somewhere # ephemeral znode created by the node when it connects to the
+                       # ZK cluster
+        - data: 2 # the data means the latest (pending_)cluster version it's ready for
+      /available_nodes/bar@somewhere
+        - data: 3
+      /available_nodes/baz@somewhere
+        - data: 3
+      /leaders # normal znode, generated as setup, used for leader election
+      /leaders/bar@somewhere-0000000002 # ephemeral_sequential, the lowest index is the leader
+      /leaders/foo@somewhere-0000000003
+      /leaders/baz@somewhere-0000000004
+      /current_cluster # persistent, generated as part of setup, but overwritten by leaders
+        - data: 2:foo@somewhere,bar@somewhere # the 2 at the beginning means the zk version of pending_cluster it was based off of
+      /pending_cluster # persistent, generated as part of setup, empty data
+                       # means no cluster structure is pending. Leaders set
+                       # this to the pending cluster structure
+        - data: foo@somewhere,bar@somewhere,baz@somewhere
+        - version: 3
+
+  So in this situation `bar@somewhere` is the current leader, the current
+  cluster is `foo` and `bar`, and the leader is in the process of changing it
+  to `foo`, `bar` and `baz`. `bar` and `baz` are ready for the change (version 3)
+  but `foo` isn't yet.
+
+  **NOTE**: It is possible that the leader is not ready for the pending cluster
+  they themselves have proposed. That's because it's the rest of the node's
+  system that gets ready, not the coordinator themself and it is an asynchronous
+  operation.
+
+  ![Coordinator state machine diagram](assets/coordinator.png)
   """
 
-  @type state :: :disconnected | :connected | :participating
+  @type state :: :disconnected | :leading | :following
 
   defstruct [
     :client_pid
