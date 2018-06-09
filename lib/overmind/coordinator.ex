@@ -1,5 +1,6 @@
 defmodule Overmind.Coordinator do
   require Logger
+  import Overmind.Utils
 
   use GenStateMachine
 
@@ -62,6 +63,13 @@ defmodule Overmind.Coordinator do
   @zk_host {'localhost', 2181}
   @chroot_path '/chroot_path'
 
+  # typo protection
+  @available_nodes_path '/available_nodes'
+  @leaders_path '/leaders'
+  @current_cluster_path '/current_cluster'
+  @pending_cluster_path '/pending_cluster'
+
+
   def start_link(:start_link_arg) do
     GenStateMachine.start_link(__MODULE__, :init_arg, name: __MODULE__)
   end
@@ -69,25 +77,33 @@ defmodule Overmind.Coordinator do
   @impl true
   def init(:init_arg) do
     Logger.info("Overmind.Coordinator initializing")
+
     # chroot path needs to be created in advance
-    {:ok, client_pid} = :erlzk.connect([@zk_host], 30000, [])
-    res = :erlzk.create(client_pid, @chroot_path)
-    true = res in [{:ok, @chroot_path}, {:error, :node_exists}]
-    # TODO other important paths
-    :ok = :erlzk.close(client_pid)
+    {:ok, root_client_pid} = :erlzk.connect([@zk_host], 30000, [])
+    ensure_znode(root_client_pid, @chroot_path)
+    :ok = :erlzk.close(root_client_pid)
 
     # the actual erlzk client
     {:ok, client_pid} = :erlzk.connect([@zk_host], 30000, chroot: @chroot_path, monitor: self())
     Logger.info("Overmind.Coordinator connected")
 
+    ensure_znode(client_pid, @available_nodes_path)
+    ensure_znode(client_pid, @leaders_path)
+    ensure_znode(client_pid, @current_cluster_path)
+    ensure_znode(client_pid, @pending_cluster_path)
+    Logger.info("Overmind.Coordinator created prerequisite paths")
+
     data = %__MODULE__{client_pid: client_pid}
-    {:ok, :connected, data, [{:next_event, :internal, :register_yourself}]}
+    {:ok, :connected, data, [{:next_event, :internal, :register}]}
   end
 
   @impl true
-  def handle_event(:internal, :register_yourself, :connected, data) do
+  def handle_event(:internal, :register, :connected, data) do
     Logger.info("Overmind.Coordinator registering itself")
-    IO.inspect(:erlzk.create(data.client_pid, '/foo'))
+    # TODO actual node name
+    IO.inspect(:erlzk.create(data.client_pid, @available_nodes_path ++ '/me' ++ '-', "-1", :ephemeral))
+    # TODO watch
+    IO.inspect(:erlzk.create(data.client_pid, @leaders_path ++ '/me', "-1", :ephemeral_sequential))
     # TODO add your node under connected nodes, transition to participating
     {:next_state, :connected, data}
   end
