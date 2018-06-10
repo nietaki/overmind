@@ -1,8 +1,10 @@
 defmodule Overmind.Coordinator do
   require Logger
   import Overmind.Utils
+  alias Overmind.ZnodeStat
 
-  use GenStateMachine
+  # use GenStateMachine, callback_mode: :state_functions
+  use GenStateMachine, callback_mode: [:handle_event_function, :state_enter]
 
   @moduledoc """
   What `#{__MODULE__}` does:
@@ -54,20 +56,28 @@ defmodule Overmind.Coordinator do
   ![Coordinator state machine diagram](assets/coordinator.png)
   """
 
+  # TODO maybe add :uninitialized for before the client has connected at all?
+  # that would save us fro blowing up in init() if the zk cluster is unreachable
   @type state :: :disconnected | :leading | :following
 
-  defstruct [
-    :client_pid
-  ]
+  defmodule Data do
+    defstruct [
+      :client_pid,
+      :leader_node,
+      :current_cluster
+    ]
+  end
+
+
 
   @zk_host {'localhost', 2181}
   @chroot_path '/chroot_path'
 
   # typo protection
-  @available_nodes_path '/available_nodes'
-  @leaders_path '/leaders'
-  @current_cluster_path '/current_cluster'
-  @pending_cluster_path '/pending_cluster'
+  @available_nodes '/available_nodes'
+  @leaders '/leaders'
+  @current_cluster '/current_cluster'
+  @pending_cluster '/pending_cluster'
 
 
   def start_link(:start_link_arg) do
@@ -87,25 +97,54 @@ defmodule Overmind.Coordinator do
     {:ok, client_pid} = :erlzk.connect([@zk_host], 30000, chroot: @chroot_path, monitor: self())
     Logger.info("Overmind.Coordinator connected")
 
-    ensure_znode(client_pid, @available_nodes_path)
-    ensure_znode(client_pid, @leaders_path)
-    ensure_znode(client_pid, @current_cluster_path)
-    ensure_znode(client_pid, @pending_cluster_path)
+    ensure_znode(client_pid, @available_nodes)
+    ensure_znode(client_pid, @leaders)
+    ensure_znode(client_pid, @current_cluster, "-1:")
+    ensure_znode(client_pid, @pending_cluster)
     Logger.info("Overmind.Coordinator created prerequisite paths")
 
-    data = %__MODULE__{client_pid: client_pid}
-    {:ok, :connected, data, [{:next_event, :internal, :register}]}
+    data = %Data{client_pid: client_pid}
+    {:ok, :disconnected, data, []}
   end
 
   @impl true
-  def handle_event(:internal, :register, :connected, data) do
+  def handle_event(:info, {:connected, _ip, _port}, :disconnected, data) do
     Logger.info("Overmind.Coordinator registering itself")
-    # TODO actual node name
-    IO.inspect(:erlzk.create(data.client_pid, @available_nodes_path ++ '/me' ++ '-', "-1", :ephemeral))
-    # TODO watch
-    IO.inspect(:erlzk.create(data.client_pid, @leaders_path ++ '/me', "-1", :ephemeral_sequential))
-    # TODO add your node under connected nodes, transition to participating
-    {:next_state, :connected, data}
+    my_available_path = @available_nodes ++ '/' ++ node_to_charlist()
+    {:ok, ^my_available_path} = :erlzk.create(data.client_pid, my_available_path, "-1", :ephemeral)
+    |> IO.inspect()
+
+    my_leaders_path = @leaders ++ '/' ++ node_to_charlist() ++ '-'
+    {:ok, @leaders ++ '/' ++ my_leader_node} = :erlzk.create(data.client_pid, my_leaders_path, :ephemeral_sequential)
+    |> IO.inspect()
+
+    {:ok, leaders} = :erlzk.get_children(data.client_pid, @leaders)
+    |> IO.inspect()
+
+    true = my_leader_node in leaders
+
+    data = %Data{data | leader_node: my_leader_node}
+
+    {:ok, {current_cluster_data, stat}} = :erlzk.get_data(data.client_pid, @current_cluster)
+    stat = ZnodeStat.new(stat)
+    IO.inspect current_cluster_data
+    IO.inspect(stat)
+
+    if get_leader(leaders) == my_leader_node do
+      # leading transition
+      Logger.info("I'm going to be a leader!")
+      {:next_state, :leading, data}
+    else
+      # following transition
+      Logger.info("I'm going to be a follower!")
+      {:next_state, :following, data}
+    end
+  end
+
+  def handle_event(:internal, :broadcast_current_cluster, state, data) do
+    Logger.info("broadcasting current cluster")
+
+    {:next_state, state, data}
   end
 
   def handle_event(event_type, event_content, state, _data) do
@@ -122,4 +161,10 @@ defmodule Overmind.Coordinator do
       start: {__MODULE__, :start_link, [:start_link_arg]}
     }
   end
+
+  # ==========================================================================
+  # Helper functions
+  # ==========================================================================
+
+
 end
