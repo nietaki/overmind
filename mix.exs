@@ -6,10 +6,10 @@ defmodule Overmind.MixProject do
       app: :overmind,
       version: "0.1.0",
       elixir: "~> 1.6",
-      elixirc_paths: elixirc_paths(Mix.env),
+      elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       deps: deps(),
-      docs: docs(),
+      docs: docs()
     ]
   end
 
@@ -24,14 +24,14 @@ defmodule Overmind.MixProject do
   # Specifies which paths to compile per environment
   defp elixirc_paths(:test), do: ["lib", "test/support"]
 
-  defp elixirc_paths(_),     do: ["lib"]
+  defp elixirc_paths(_), do: ["lib"]
 
   defp docs do
     [
       main: "readme",
       source_url: "https://github.com/nietaki/overmind",
       extras: ["README.md"],
-      assets: ["assets"],
+      assets: ["assets"]
       # logo: "assets/todo.png",
     ]
   end

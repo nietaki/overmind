@@ -68,8 +68,6 @@ defmodule Overmind.Coordinator do
     ]
   end
 
-
-
   @zk_host {'localhost', 2181}
   @chroot_path '/chroot_path'
 
@@ -78,7 +76,6 @@ defmodule Overmind.Coordinator do
   @leaders '/leaders'
   @current_cluster '/current_cluster'
   @pending_cluster '/pending_cluster'
-
 
   def start_link(:start_link_arg) do
     GenStateMachine.start_link(__MODULE__, :init_arg, name: __MODULE__)
@@ -111,15 +108,20 @@ defmodule Overmind.Coordinator do
   def handle_event(:info, {:connected, _ip, _port}, :disconnected, data) do
     Logger.info("Overmind.Coordinator registering itself")
     my_available_path = @available_nodes ++ '/' ++ node_to_charlist()
-    {:ok, ^my_available_path} = :erlzk.create(data.client_pid, my_available_path, "-1", :ephemeral)
-    |> IO.inspect()
+
+    {:ok, ^my_available_path} =
+      :erlzk.create(data.client_pid, my_available_path, "-1", :ephemeral)
+      |> IO.inspect()
 
     my_leaders_path = @leaders ++ '/' ++ node_to_charlist() ++ '-'
-    {:ok, @leaders ++ '/' ++ my_leader_node} = :erlzk.create(data.client_pid, my_leaders_path, :ephemeral_sequential)
-    |> IO.inspect()
 
-    {:ok, leaders} = :erlzk.get_children(data.client_pid, @leaders)
-    |> IO.inspect()
+    {:ok, @leaders ++ '/' ++ my_leader_node} =
+      :erlzk.create(data.client_pid, my_leaders_path, :ephemeral_sequential)
+      |> IO.inspect()
+
+    {:ok, leaders} =
+      :erlzk.get_children(data.client_pid, @leaders)
+      |> IO.inspect()
 
     true = my_leader_node in leaders
 
@@ -127,7 +129,7 @@ defmodule Overmind.Coordinator do
 
     {:ok, {current_cluster_data, stat}} = :erlzk.get_data(data.client_pid, @current_cluster)
     stat = ZnodeStat.new(stat)
-    IO.inspect current_cluster_data
+    IO.inspect(current_cluster_data)
     IO.inspect(stat)
 
     if get_leader(leaders) == my_leader_node do
@@ -165,6 +167,4 @@ defmodule Overmind.Coordinator do
   # ==========================================================================
   # Helper functions
   # ==========================================================================
-
-
 end

@@ -35,12 +35,13 @@ defmodule Overmind.Utils do
       end)
       |> Enum.sort()
       |> Enum.take(1)
+
     case actual_leader do
       [] ->
         nil
+
       [{{_, _}, full_name}] ->
         full_name
     end
-
   end
 end
