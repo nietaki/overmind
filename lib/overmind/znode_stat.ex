@@ -2,7 +2,8 @@ defmodule Overmind.ZnodeStat do
   @moduledoc """
   All fields of the struct are non-negative integers
 
-  For fields' meanings see https://github.com/huaban/erlzk/blob/master/include/erlzk.hrl#L13-L25
+  For fields' meanings see
+  https://zookeeper.apache.org/doc/r3.1.2/zookeeperProgrammers.html#sc_timeInZk
   """
 
   @enforce_keys [

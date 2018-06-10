@@ -8,6 +8,9 @@ defmodule Overmind.MixProject do
       elixir: "~> 1.6",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
+      elixirc_options: [
+        warnings_as_errors: true
+      ],
       deps: deps(),
       docs: docs()
     ]
