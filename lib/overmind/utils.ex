@@ -1,15 +1,12 @@
 defmodule Overmind.Utils do
   def ensure_znode(client_pid, path, data \\ "") do
     res = :erlzk.create(client_pid, path, data)
-    true = res in [{:ok, path}, {:error, :node_exists}]
-  end
-
-  def node_to_charlist(node \\ Node.self()) when is_atom(node) do
-    node |> to_charlist()
-  end
-
-  def node_from_charlist(charlist) when is_list(charlist) do
-    charlist |> :erlang.list_to_atom()
+    case res do
+      {:ok, _path} -> res
+      {:error, :node_exists} -> res
+      other ->
+        raise "unexpected result in ensure_znode: #{inspect other}"
+    end
   end
 
   # ==========================================================================

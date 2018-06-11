@@ -65,26 +65,23 @@ defmodule Overmind.Coordinator do
 
   defmodule Data do
     defstruct [
-      :client_pid,
-      :leader_node,
-      :current_cluster,
-      :pending_cluster,
+      :client_pid, # pid
+      :leader_node, # String.t
+      :current_cluster, # %Cluster{}
+      :pending_cluster, # %Cluster{}
       :available_node_readiness, # node :: atom() => version :: integer
     ]
   end
 
   @zk_host {'localhost', 2181}
-  @chroot_path '/chroot'
+  @chroot_path "/chroot"
 
   # typo protection
-  @available_nodes '/available_nodes'
-  @available_nodes_binary List.to_string(@available_nodes)
-  @leaders '/leaders'
-  # @leaders_binary List.to_string(@leaders)
-  @current_cluster '/current_cluster'
-  # @current_cluster_binary List.to_string(@current_cluster)
-  @pending_cluster '/pending_cluster'
-  # @pending_cluster_binary List.to_string(@pending_cluster)
+  @available_nodes "/available_nodes"
+  @leaders "/leaders"
+  @leaders_charlist String.to_charlist(@leaders)
+  @current_cluster "/current_cluster"
+  @pending_cluster "/pending_cluster"
 
   def start_link(:start_link_arg) do
     GenStateMachine.start_link(__MODULE__, :init_arg, name: __MODULE__)
@@ -103,7 +100,7 @@ defmodule Overmind.Coordinator do
     {:ok, client_pid} = :erlzk.connect([@zk_host], 30000, chroot: @chroot_path, monitor: self())
     Logger.info("Overmind.Coordinator connected")
 
-    ensure_znode(client_pid, @available_nodes_binary)
+    ensure_znode(client_pid, @available_nodes)
     ensure_znode(client_pid, @leaders)
     ensure_znode(client_pid, @current_cluster, "-1:")
     ensure_znode(client_pid, @pending_cluster)
@@ -120,17 +117,17 @@ defmodule Overmind.Coordinator do
   @impl true
   def handle_event(:info, {:connected, _ip, _port}, :disconnected, data) do
     Logger.info("Overmind.Coordinator registering itself")
-    my_available_path = @available_nodes ++ '/' ++ node_to_charlist()
+    my_available_path = Path.join(@available_nodes, Atom.to_string(Node.self()))
 
     # NOTE if the previous instance of this node has disconnected recently, the
     # node might still be there, consider retries maybe
-    {:ok, ^my_available_path} =
+    {:ok, _path} =
       :erlzk.create(data.client_pid, my_available_path, "-1", :ephemeral)
       |> IO.inspect()
 
-    my_leaders_path = @leaders ++ '/' ++ node_to_charlist() ++ '-'
+    my_leaders_path = "#{@leaders}/#{Node.self()}-"
 
-    {:ok, @leaders ++ '/' ++ my_leader_node} =
+    {:ok, @leaders_charlist ++ '/' ++ my_leader_node} =
       :erlzk.create(data.client_pid, my_leaders_path, :ephemeral_sequential)
       |> IO.inspect()
 
@@ -140,7 +137,7 @@ defmodule Overmind.Coordinator do
 
     true = my_leader_node in leaders
 
-    data = %Data{data | leader_node: my_leader_node}
+    data = %Data{data | leader_node: List.to_string(my_leader_node)}
 
     {:ok, {current_cluster_data, stat}} = :erlzk.get_data(data.client_pid, @current_cluster)
     stat = ZnodeStat.new(stat)
@@ -156,7 +153,7 @@ defmodule Overmind.Coordinator do
       # leading transition
       Logger.info("I'm going to be a leader!")
       # pretending available nodes changed to bootstrap the leading state
-      {:next_state, :leading, data, [info({:node_children_changed, @available_nodes_binary})]}
+      {:next_state, :leading, data, [info({:node_children_changed, @available_nodes})]}
     else
       # following transition
       Logger.info("I'm going to be a follower!")
@@ -168,11 +165,12 @@ defmodule Overmind.Coordinator do
   # Leading state
   # --------------------------------------------------------------------------
 
-  def handle_event(:info, {:node_children_changed, @available_nodes_binary}, :leading, data) do
+  def handle_event(:info, {:node_children_changed, @available_nodes}, :leading, data) do
     Logger.info("available nodes changed watcher triggered")
     # immediately re-setting the watcher
     {:ok, available_nodes} = :erlzk.get_children(data.client_pid, @available_nodes, self())
     IO.inspect available_nodes
+    available_nodes = Enum.map(available_nodes, &List.to_string/1)
     # forwarding the info to the actual handler
     {:next_state, :leading, data, [internal({:available_nodes_changed, available_nodes})]}
   end
@@ -182,7 +180,7 @@ defmodule Overmind.Coordinator do
     pending_cluster = Cluster.new(-13, available_nodes)
 
     pending_cluster_data = Cluster.to_pending_cluster_data(pending_cluster)
-    :erlzk.set_data(data.client_pid, @pending_cluster, pending_cluster_data)
+    {:ok, _} = :erlzk.set_data(data.client_pid, @pending_cluster, pending_cluster_data)
     {:ok, {^pending_cluster_data, stat}} = :erlzk.get_data(data.client_pid, @pending_cluster)
     stat = ZnodeStat.new(stat)
 
@@ -191,7 +189,7 @@ defmodule Overmind.Coordinator do
     # trashing the old values because they could potentially be out of sync
     available_node_readiness =
       available_nodes
-      |> Enum.map(&List.to_atom/1)
+      |> Enum.map(&String.to_atom/1)
       |> Enum.map(&{&1, -1})
       |> Map.new()
 
@@ -200,18 +198,18 @@ defmodule Overmind.Coordinator do
 
     available_node_changed_actions = available_nodes
       |> Enum.map(fn available_node ->
-        node_path = @available_nodes ++ '/' ++ available_node
+        node_path = Path.join(@available_nodes, available_node)
         # :erlzk is awesome and deduplicates duplicate watchches with same path and pid
         # it's ok to set the watch blindly even if there is one set already
         {:ok, {data, _stat}} = :erlzk.get_data(data.client_pid, node_path, self())
-        internal({:available_node_changed, List.to_atom(available_node), String.to_integer(data)})
+        internal({:available_node_changed, String.to_atom(available_node), String.to_integer(data)})
       end)
 
     IO.inspect(data)
     {:next_state, :leading, data, available_node_changed_actions}
   end
 
-  def handle_event(:info, {:node_data_changed, @available_nodes_binary <> "/" <> _node_name }, :leading, data) do
+  def handle_event(:info, {:node_data_changed, @available_nodes <> "/" <> _node_name }, :leading, data) do
 
     # {:ok, {data, _stat}} = :erlzk.get_data(data.client_pid, path, self())
     # TODO send {:available_node_changed} event
