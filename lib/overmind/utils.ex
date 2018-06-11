@@ -1,11 +1,8 @@
 defmodule Overmind.Utils do
-  def ensure_znode(client_pid, path, data \\ "") when is_list(path) do
+  def ensure_znode(client_pid, path, data \\ "") do
     res = :erlzk.create(client_pid, path, data)
     true = res in [{:ok, path}, {:error, :node_exists}]
-    :ok
   end
-
-  # TODO znodestat to a nice struct
 
   def node_to_charlist(node \\ Node.self()) when is_atom(node) do
     node |> to_charlist()

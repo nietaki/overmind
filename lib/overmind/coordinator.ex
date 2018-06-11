@@ -78,9 +78,13 @@ defmodule Overmind.Coordinator do
 
   # typo protection
   @available_nodes '/available_nodes'
+  @available_nodes_binary List.to_string(@available_nodes)
   @leaders '/leaders'
+  # @leaders_binary List.to_string(@leaders)
   @current_cluster '/current_cluster'
+  # @current_cluster_binary List.to_string(@current_cluster)
   @pending_cluster '/pending_cluster'
+  # @pending_cluster_binary List.to_string(@pending_cluster)
 
   def start_link(:start_link_arg) do
     GenStateMachine.start_link(__MODULE__, :init_arg, name: __MODULE__)
@@ -99,7 +103,7 @@ defmodule Overmind.Coordinator do
     {:ok, client_pid} = :erlzk.connect([@zk_host], 30000, chroot: @chroot_path, monitor: self())
     Logger.info("Overmind.Coordinator connected")
 
-    ensure_znode(client_pid, @available_nodes)
+    ensure_znode(client_pid, @available_nodes_binary)
     ensure_znode(client_pid, @leaders)
     ensure_znode(client_pid, @current_cluster, "-1:")
     ensure_znode(client_pid, @pending_cluster)
@@ -118,6 +122,8 @@ defmodule Overmind.Coordinator do
     Logger.info("Overmind.Coordinator registering itself")
     my_available_path = @available_nodes ++ '/' ++ node_to_charlist()
 
+    # NOTE if the previous instance of this node has disconnected recently, the
+    # node might still be there, consider retries maybe
     {:ok, ^my_available_path} =
       :erlzk.create(data.client_pid, my_available_path, "-1", :ephemeral)
       |> IO.inspect()
@@ -150,7 +156,7 @@ defmodule Overmind.Coordinator do
       # leading transition
       Logger.info("I'm going to be a leader!")
       # pretending available nodes changed to bootstrap the leading state
-      {:next_state, :leading, data, [info({:node_children_changed, @available_nodes})]}
+      {:next_state, :leading, data, [info({:node_children_changed, @available_nodes_binary})]}
     else
       # following transition
       Logger.info("I'm going to be a follower!")
@@ -162,8 +168,7 @@ defmodule Overmind.Coordinator do
   # Leading state
   # --------------------------------------------------------------------------
 
-  def handle_event(:info, {:node_children_changed, @available_nodes}, :leading, data) do
-    # FIXME the actual event will contain a binary, not a charlist
+  def handle_event(:info, {:node_children_changed, @available_nodes_binary}, :leading, data) do
     Logger.info("available nodes changed watcher triggered")
     # immediately re-setting the watcher
     {:ok, available_nodes} = :erlzk.get_children(data.client_pid, @available_nodes, self())
@@ -181,7 +186,6 @@ defmodule Overmind.Coordinator do
     {:ok, {^pending_cluster_data, stat}} = :erlzk.get_data(data.client_pid, @pending_cluster)
     stat = ZnodeStat.new(stat)
 
-    # TODO
     pending_cluster = Cluster.from_pending_cluster_data(stat.version, pending_cluster_data)
 
     # trashing the old values because they could potentially be out of sync
@@ -207,15 +211,15 @@ defmodule Overmind.Coordinator do
     {:next_state, :leading, data, available_node_changed_actions}
   end
 
-  def handle_event(:info, {:node_data_changed, path}, :leading, data) do
-    # NOTE path will be a binary
-    {:ok, {data, _stat}} = :erlzk.get_data(data.client_pid, path, self())
+  def handle_event(:info, {:node_data_changed, @available_nodes_binary <> "/" <> _node_name }, :leading, data) do
+
+    # {:ok, {data, _stat}} = :erlzk.get_data(data.client_pid, path, self())
     # TODO send {:available_node_changed} event
 
     {:next_state, :leading, data}
   end
 
-  def handle_event(:internal, {:available_node_changed, node_atom, version}, :leading, data) do
+  def handle_event(:internal, {:available_node_changed, _node_atom, _version}, :leading, data) do
 
     IO.puts "handling available node changed"
 
