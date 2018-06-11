@@ -51,7 +51,7 @@ when the cluster remains stable.
 
 - [x] Get a feel for using ZK from Elixir
 - [ ] per-node Coordinator actor to handle cluster membership changes
-  - [ ] a nice state diagram for it
+  - [x] a nice state diagram for it
 - [ ] registry for local virtual actors
 - [ ] virtual actor wrapper to separate the actor process and its lifecycle management
 - [ ] saving actor state to the db

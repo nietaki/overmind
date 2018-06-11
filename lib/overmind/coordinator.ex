@@ -209,17 +209,17 @@ defmodule Overmind.Coordinator do
     {:next_state, :leading, data, available_node_changed_actions}
   end
 
-  def handle_event(:info, {:node_data_changed, @available_nodes <> "/" <> _node_name }, :leading, data) do
+  def handle_event(:info, {:node_data_changed, node_path = @available_nodes <> "/" <> node_name}, :leading, data) do
 
-    # {:ok, {data, _stat}} = :erlzk.get_data(data.client_pid, path, self())
-    # TODO send {:available_node_changed} event
+    {:ok, {data, _stat}} = :erlzk.get_data(data.client_pid, node_path, self())
+    actions = [internal({:available_node_changed, String.to_atom(node_name), String.to_integer(data)})]
 
-    {:next_state, :leading, data}
+    {:next_state, :leading, data, actions}
   end
 
   def handle_event(:internal, {:available_node_changed, _node_atom, _version}, :leading, data) do
-
     IO.puts "handling available node changed"
+    # TODO update the ready
 
     {:next_state, :leading, data}
   end
