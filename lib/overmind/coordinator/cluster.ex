@@ -6,11 +6,24 @@ defmodule Overmind.Coordinator.Cluster do
 
   defstruct @enforce_keys
 
+  def new(nodes, version) when is_integer(version) do
+    nodes = Enum.map(nodes, fn
+      node when is_atom(node) ->
+        node
+      node when is_list(node) ->
+        List.to_atom(node)
+      node when is_binary(node) ->
+        String.to_atom(node)
+    end)
+
+    %__MODULE__{version: version, nodes: nodes}
+  end
+
   def from_current_cluster_data(data) when is_binary(data) do
     [version, nodes] = String.split(data, ":", parts: 2)
     version = String.to_integer(version)
     nodes = String.split(nodes, ",", trim: true)
-    new(version, nodes)
+    new(nodes, version)
   end
 
   def to_current_cluster_data(%__MODULE__{version: version, nodes: nodes}) do
@@ -29,19 +42,6 @@ defmodule Overmind.Coordinator.Cluster do
 
   def from_pending_cluster_data(version, data) do
     nodes = String.split(data, ",", trim: true)
-    new(version, nodes)
-  end
-
-  def new(version, nodes) when is_integer(version) do
-    nodes = Enum.map(nodes, fn
-      node when is_atom(node) ->
-        node
-      node when is_list(node) ->
-        List.to_atom(node)
-      node when is_binary(node) ->
-        String.to_atom(node)
-    end)
-
-    %__MODULE__{version: version, nodes: nodes}
+    new(nodes, version)
   end
 end

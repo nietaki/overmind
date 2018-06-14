@@ -6,8 +6,8 @@ defmodule Overmind.Coordinator do
 
   # use GenStateMachine, callback_mode: :state_functions
   # NOTE state_enter functions aren't allowed to set next_event actions
-  # use GenStateMachine, callback_mode: [:handle_event_function, :state_enter]
-  use GenStateMachine, callback_mode: [:handle_event_function]
+  use GenStateMachine, callback_mode: [:handle_event_function, :state_enter]
+  # use GenStateMachine, callback_mode: [:handle_event_function]
 
   @moduledoc """
   What `#{__MODULE__}` does:
@@ -64,13 +64,71 @@ defmodule Overmind.Coordinator do
   @type state :: :disconnected | :leading | :following
 
   defmodule Data do
+    @type t :: %__MODULE__{}
+
     defstruct [
       :client_pid, # pid
       :leader_node, # String.t
+
       :current_cluster, # %Cluster{}
       :pending_cluster, # %Cluster{}
-      :available_node_readiness, # node :: atom() => version :: integer
+      :available_nodes, # node :: atom() => version :: integer
     ]
+
+    def current_cluster_changed(%__MODULE__{} = data, %Cluster{} = cluster) do
+      %__MODULE__{
+        data |
+        current_cluster: cluster,
+        pending_cluster: nil,
+        available_nodes: nil
+      }
+      |> changed(true)
+    end
+
+    def pending_cluster_changed(%__MODULE__{} = data, %Cluster{} = cluster) do
+      readiness =
+        cluster.nodes
+        |> Enum.map(& {&1, -1})
+        |> Map.new
+
+      %__MODULE__{
+        data |
+        pending_cluster: cluster,
+        available_nodes: readiness
+      }
+      |> changed(true)
+    end
+
+    def available_node_changed(%__MODULE__{} = data, node, node_readiness_version) do
+      false = data.pending_cluster == nil
+      new_available =
+        data.available_nodes
+        |> Map.update!(node, &max(&1, node_readiness_version))
+
+      if Enum.all?(new_available, fn {_n, version} -> version >= data.pending_cluster.version end) do
+        %__MODULE__{
+          data |
+          current_cluster: data.pending_cluster,
+          pending_cluster: nil,
+          available_nodes: nil
+        }
+        |> changed(true)
+      else
+        %__MODULE__{
+          data |
+          available_nodes: new_available
+        }
+        |> changed(false)
+      end
+    end
+
+    def stable?(%__MODULE__{pending_cluster: pending_cluster}) do
+      pending_cluster == nil
+    end
+
+    defp changed(data, is_changed) when is_boolean(is_changed) do
+      {data, is_changed}
+    end
   end
 
   @zk_host {'localhost', 2181}
@@ -177,7 +235,7 @@ defmodule Overmind.Coordinator do
 
   def handle_event(:internal, {:available_nodes_changed, available_nodes}, :leading, data) do
     Logger.info("available nodes changed")
-    pending_cluster = Cluster.new(-13, available_nodes)
+    pending_cluster = Cluster.new(available_nodes, -13)
 
     pending_cluster_data = Cluster.to_pending_cluster_data(pending_cluster)
     {:ok, _} = :erlzk.set_data(data.client_pid, @pending_cluster, pending_cluster_data)
@@ -186,23 +244,16 @@ defmodule Overmind.Coordinator do
 
     pending_cluster = Cluster.from_pending_cluster_data(stat.version, pending_cluster_data)
 
-    # trashing the old values because they could potentially be out of sync
-    available_node_readiness =
-      available_nodes
-      |> Enum.map(&String.to_atom/1)
-      |> Enum.map(&{&1, -1})
-      |> Map.new()
+    {data, true} = Data.pending_cluster_changed(data, pending_cluster)
 
-    data = %Data{data | pending_cluster: pending_cluster, available_node_readiness: available_node_readiness}
-    # TODO individual nodes
-
-    available_node_changed_actions = available_nodes
+    available_node_changed_actions =
+      data.pending_cluster.nodes
       |> Enum.map(fn available_node ->
-        node_path = Path.join(@available_nodes, available_node)
+        node_path = Path.join(@available_nodes, Atom.to_string(available_node))
         # :erlzk is awesome and deduplicates duplicate watchches with same path and pid
         # it's ok to set the watch blindly even if there is one set already
         {:ok, {data, _stat}} = :erlzk.get_data(data.client_pid, node_path, self())
-        internal({:available_node_changed, String.to_atom(available_node), String.to_integer(data)})
+        internal({:available_node_changed, available_node, String.to_integer(data)})
       end)
 
     IO.inspect(data)
@@ -228,6 +279,11 @@ defmodule Overmind.Coordinator do
   # Other / generic
   # --------------------------------------------------------------------------
 
+  # def handle_event(:internal, :broadcast_cluster, _, data) do
+  #   broadcast_cluster(data)
+  #   :keep_state_and_data
+  # end
+
   def handle_event(event_type, event_content, state, _data) do
     Logger.warn(
       "Coordinator OTHER_EVENT at #{inspect(state)}: #{inspect({event_type, event_content})}"
@@ -246,6 +302,11 @@ defmodule Overmind.Coordinator do
   # ==========================================================================
   # Helper functions
   # ==========================================================================
+
+  def broadcast_cluster(%Data{} = data) do
+    Logger.warn("broadcasting cluster, stable: #{Data.stable?(data)}")
+  end
+
   defp internal(event) do
     {:next_event, :internal, event}
   end
