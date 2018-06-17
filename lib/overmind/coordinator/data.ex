@@ -8,6 +8,8 @@ defmodule Overmind.Coordinator.Data do
     :self_node,
     # pid
     :client_pid,
+    # [pid | atom]
+    :subscribers,
     # String.t
     :leader_node,
     # %Cluster{}
@@ -19,7 +21,9 @@ defmodule Overmind.Coordinator.Data do
   ]
 
   def new() do
-    %__MODULE__{}
+    %__MODULE__{
+      subscribers: []
+    }
   end
 
   def set_leader_node(data, leader_node) when is_binary(leader_node) do

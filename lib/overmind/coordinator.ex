@@ -7,8 +7,8 @@ defmodule Overmind.Coordinator do
 
   # use GenStateMachine, callback_mode: :state_functions
   # NOTE state_enter functions aren't allowed to set next_event actions
-  use GenStateMachine, callback_mode: [:handle_event_function, :state_enter]
-  # use GenStateMachine, callback_mode: [:handle_event_function]
+  # use GenStateMachine, callback_mode: [:handle_event_function, :state_enter]
+  use GenStateMachine, callback_mode: [:handle_event_function]
 
   @moduledoc """
   What `#{__MODULE__}` does:
@@ -63,7 +63,7 @@ defmodule Overmind.Coordinator do
   # TODO maybe add :uninitialized for before the client has connected at all?
   # that would save us fro blowing up in init() if the zk cluster is unreachable
   @type state :: :disconnected | :leading | :following
-  @opts [:notification_targets, :zk_servers, :chroot_path, :self_node]
+  @opts [:notification_targets, :zk_servers, :chroot_path, :self_node, :subscribers]
 
   @zk_host {'localhost', 2181}
   @default_chroot_path "/overmind"
@@ -108,6 +108,7 @@ defmodule Overmind.Coordinator do
     chroot_path = Keyword.get(opts, :chroot_path, @default_chroot_path)
     # for tests mainly
     self_node = Keyword.get(opts, :self_node, Node.self())
+    subscribers = Keyword.get(opts, :subscribers, [])
 
     # chroot path needs to be created in advance
     {:ok, root_client_pid} = :erlzk.connect(zk_servers, 30000, [])
@@ -125,7 +126,13 @@ defmodule Overmind.Coordinator do
     ensure_znode(client_pid, @pending_cluster)
     Logger.info("Overmind.Coordinator created prerequisite paths")
 
-    data = %Data{Data.new() | self_node: self_node, client_pid: client_pid}
+    data = %Data{
+      Data.new()
+      | self_node: self_node,
+        client_pid: client_pid,
+        subscribers: subscribers
+    }
+
     {:ok, :disconnected, data, []}
   end
 
@@ -158,8 +165,8 @@ defmodule Overmind.Coordinator do
     current_cluster = Cluster.from_current_cluster_data(current_cluster_data)
 
     {data, true} = Data.current_cluster_changed(data, current_cluster)
+    broadcast_cluster(data)
 
-    # TODO propagate current cluster
     if get_leader(leaders) == my_leader_node do
       # leading transition
       Logger.info("I'm going to be a leader!")
@@ -197,6 +204,7 @@ defmodule Overmind.Coordinator do
     pending_cluster = Cluster.from_pending_cluster_data(stat.version, pending_cluster_data)
 
     {data, true} = Data.pending_cluster_changed(data, pending_cluster)
+    broadcast_cluster(data)
 
     available_node_changed_actions =
       data.pending_cluster.nodes
@@ -231,8 +239,11 @@ defmodule Overmind.Coordinator do
   def handle_event(:internal, {:available_node_changed, node_atom, version}, :leading, data) do
     Logger.info("handling available node changed #{node_atom} went to #{version}")
     {data, changed} = Data.available_node_changed(data, node_atom, version)
-    Logger.info("will broadcast: #{changed}")
-    # TODO broadcast
+
+    if changed do
+      broadcast_cluster(data)
+    end
+
     {:next_state, :leading, data}
   end
 
@@ -247,11 +258,6 @@ defmodule Overmind.Coordinator do
   # --------------------------------------------------------------------------
   # Other / generic
   # --------------------------------------------------------------------------
-
-  # def handle_event(:internal, :broadcast_cluster, _, data) do
-  #   broadcast_cluster(data)
-  #   :keep_state_and_data
-  # end
 
   def handle_event({:call, from}, :get_state_and_data, state, data) do
     GenStateMachine.reply(from, {state, data})
@@ -277,8 +283,15 @@ defmodule Overmind.Coordinator do
   # Helper functions
   # ==========================================================================
 
-  def broadcast_cluster(%Data{} = data) do
-    Logger.warn("broadcasting cluster, stable: #{Data.stable?(data)}")
+  def broadcast_cluster(%Data{subscribers: subscribers} = data) do
+    Logger.warn(
+      "broadcasting to #{Enum.count(subscribers)} subscribers, stable: #{Data.stable?(data)}"
+    )
+
+    Enum.each(subscribers, fn s ->
+      msg = {:clusters_changed, data.current_cluster, data.pending_cluster}
+      send(s, msg)
+    end)
   end
 
   defp internal(event) do

@@ -111,12 +111,22 @@ defmodule Overmind.CoordinatorTest do
     end
 
     test "Just one server scenario", %{opts: opts} do
-      {:ok, pid} = Coordinator.start_link(opts ++ [self_node: :a@foo])
+      {:ok, pid} = Coordinator.start_link(opts ++ [self_node: :a@foo, subscribers: [self()]])
       assert is_pid(pid)
 
       assert {:leading, data} = Coordinator.get_state_and_data(pid)
       assert data.current_cluster == %Cluster{nodes: [], version: -1}
       assert data.pending_cluster == %Cluster{nodes: [:a@foo], version: 1}
+
+      assert_receive {:clusters_changed, current, pending}
+      assert current == Cluster.new([], -1)
+      assert pending == nil
+
+      assert_receive {:clusters_changed, current, pending}
+      assert current == Cluster.new([], -1)
+      assert pending == Cluster.new([:a@foo], 1)
+
+      refute_receive {:clusters_changed, _, _}
 
       Coordinator.node_ready(pid, 1)
 
@@ -127,6 +137,10 @@ defmodule Overmind.CoordinatorTest do
 
       assert {:leading, data} = Coordinator.get_state_and_data(pid)
       assert data.pending_cluster == nil
+
+      assert_receive {:clusters_changed, current_cluster, nil}
+      assert current_cluster == Cluster.new([:a@foo], 1)
+      refute_receive {:clusters_changed, _, _}
     end
 
     test "killing the coordinator kills its zk client too", %{opts: opts} do
