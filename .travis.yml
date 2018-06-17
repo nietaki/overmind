@@ -5,10 +5,11 @@ elixir:
   - 1.6.3
 otp_release:
   # - 18.3
-  - 19.1
+  # - 19.1
   - 20.0
 before_install:
   - "sudo apt-get install -y zookeeper"
+  - "find / -name zkCli.sh"
 before_script:
   - "sudo service zookeeper-server init"
   - "sudo service zookeeper-server start"
