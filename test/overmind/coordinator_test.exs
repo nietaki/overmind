@@ -146,6 +146,7 @@ defmodule Overmind.CoordinatorTest do
       refute_receive {:clusters_changed, _, _}
     end
 
+    @tag :skip
     test "basic 2 server scenario", %{opts: opts} do
       _ = start_link_coordinator(opts, @a)
       assert_receive {@a, {:clusters_changed, _, _}}
