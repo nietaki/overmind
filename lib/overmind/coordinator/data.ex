@@ -4,6 +4,8 @@ defmodule Overmind.Coordinator.Data do
   @type t :: %__MODULE__{}
 
   defstruct [
+    # atom
+    :self_node,
     # pid
     :client_pid,
     # String.t

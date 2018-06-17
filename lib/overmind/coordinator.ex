@@ -63,9 +63,10 @@ defmodule Overmind.Coordinator do
   # TODO maybe add :uninitialized for before the client has connected at all?
   # that would save us fro blowing up in init() if the zk cluster is unreachable
   @type state :: :disconnected | :leading | :following
+  @opts [:notification_targets, :zk_servers, :chroot_path, :self_node]
 
   @zk_host {'localhost', 2181}
-  @chroot_path "/chroot"
+  @default_chroot_path "/overmind"
 
   # typo protection
   @available_nodes "/available_nodes"
@@ -78,25 +79,40 @@ defmodule Overmind.Coordinator do
   # Public API
   # ==========================================================================
 
+  def get_state_and_data(coordinator) do
+    GenStateMachine.call(coordinator, :get_state_and_data)
+  end
+
   # ==========================================================================
   # Callbacks
   # ==========================================================================
 
-  def start_link(:start_link_arg) do
-    GenStateMachine.start_link(__MODULE__, :init_arg, name: __MODULE__)
+  def start_link(opts) do
+    {coordinator_opts, gsm_opts} = Keyword.split(opts, @opts)
+    GenStateMachine.start_link(__MODULE__, coordinator_opts, gsm_opts)
+  end
+
+  def start(opts) do
+    {coordinator_opts, gsm_opts} = Keyword.split(opts, @opts)
+    GenStateMachine.start(__MODULE__, coordinator_opts, gsm_opts)
   end
 
   @impl true
-  def init(:init_arg) do
+  def init(opts) do
     Logger.info("Overmind.Coordinator initializing")
+    zk_servers = Keyword.fetch!(opts, :zk_servers)
+    chroot_path = Keyword.get(opts, :chroot_path, @default_chroot_path)
+    # for tests mainly
+    self_node = Keyword.get(opts, :self_node, Node.self())
 
     # chroot path needs to be created in advance
-    {:ok, root_client_pid} = :erlzk.connect([@zk_host], 30000, [])
-    ensure_znode(root_client_pid, @chroot_path)
+    {:ok, root_client_pid} = :erlzk.connect(zk_servers, 30000, [])
+    ensure_znode(root_client_pid, chroot_path)
     :ok = :erlzk.close(root_client_pid)
 
     # the actual erlzk client
-    {:ok, client_pid} = :erlzk.connect([@zk_host], 30000, chroot: @chroot_path, monitor: self())
+    {:ok, client_pid} = :erlzk.connect([@zk_host], 30000, chroot: chroot_path, monitor: self())
+    suicide_pact(client_pid)
     Logger.info("Overmind.Coordinator connected")
 
     ensure_znode(client_pid, @available_nodes)
@@ -105,7 +121,7 @@ defmodule Overmind.Coordinator do
     ensure_znode(client_pid, @pending_cluster)
     Logger.info("Overmind.Coordinator created prerequisite paths")
 
-    data = %Data{Data.new() | client_pid: client_pid}
+    data = %Data{Data.new() | self_node: self_node, client_pid: client_pid}
     {:ok, :disconnected, data, []}
   end
 
@@ -116,32 +132,24 @@ defmodule Overmind.Coordinator do
   @impl true
   def handle_event(:info, {:connected, _ip, _port}, :disconnected, data) do
     Logger.info("Overmind.Coordinator registering itself")
-    my_available_path = Path.join(@available_nodes, Atom.to_string(Node.self()))
+    my_available_path = Path.join(@available_nodes, Atom.to_string(data.self_node))
 
     # NOTE if the previous instance of this node has disconnected recently, the
     # node might still be there, consider retries maybe
-    {:ok, _path} =
-      :erlzk.create(data.client_pid, my_available_path, "-1", :ephemeral)
-      |> IO.inspect()
+    {:ok, _path} = :erlzk.create(data.client_pid, my_available_path, "-1", :ephemeral)
 
-    my_leaders_path = "#{@leaders}/#{Node.self()}-"
+    my_leaders_path = "#{@leaders}/#{data.self_node}-"
 
     {:ok, @leaders_charlist ++ '/' ++ my_leader_node} =
       :erlzk.create(data.client_pid, my_leaders_path, :ephemeral_sequential)
-      |> IO.inspect()
 
-    {:ok, leaders} =
-      :erlzk.get_children(data.client_pid, @leaders)
-      |> IO.inspect()
+    {:ok, leaders} = :erlzk.get_children(data.client_pid, @leaders)
 
     true = my_leader_node in leaders
 
     data = Data.set_leader_node(data, List.to_string(my_leader_node))
 
-    {:ok, {current_cluster_data, stat}} = :erlzk.get_data(data.client_pid, @current_cluster)
-    stat = ZnodeStat.new(stat)
-    IO.inspect(current_cluster_data)
-    IO.inspect(stat)
+    {:ok, {current_cluster_data, _stat}} = :erlzk.get_data(data.client_pid, @current_cluster)
 
     current_cluster = Cluster.from_current_cluster_data(current_cluster_data)
 
@@ -168,7 +176,6 @@ defmodule Overmind.Coordinator do
     Logger.info("available nodes changed watcher triggered")
     # immediately re-setting the watcher
     {:ok, available_nodes} = :erlzk.get_children(data.client_pid, @available_nodes, self())
-    IO.inspect(available_nodes)
     available_nodes = Enum.map(available_nodes, &List.to_string/1)
     # forwarding the info to the actual handler
     {:next_state, :leading, data, [internal({:available_nodes_changed, available_nodes})]}
@@ -197,7 +204,6 @@ defmodule Overmind.Coordinator do
         internal({:available_node_changed, available_node, String.to_integer(data)})
       end)
 
-    IO.inspect(data)
     {:next_state, :leading, data, available_node_changed_actions}
   end
 
@@ -217,7 +223,7 @@ defmodule Overmind.Coordinator do
   end
 
   def handle_event(:internal, {:available_node_changed, _node_atom, _version}, :leading, data) do
-    IO.puts("handling available node changed")
+    Logger.info("handling available node changed")
     # TODO update the ready
 
     {:next_state, :leading, data}
@@ -231,6 +237,11 @@ defmodule Overmind.Coordinator do
   #   broadcast_cluster(data)
   #   :keep_state_and_data
   # end
+
+  def handle_event({:call, from}, :get_state_and_data, state, data) do
+    GenStateMachine.reply(from, {state, data})
+    :keep_state_and_data
+  end
 
   def handle_event(event_type, event_content, state, _data) do
     Logger.warn(
@@ -261,5 +272,21 @@ defmodule Overmind.Coordinator do
 
   defp info(event) do
     {:next_event, :info, event}
+  end
+
+  defp suicide_pact(client_pid) do
+    originating_process = self()
+
+    pact = fn ->
+      ref = Process.monitor(originating_process)
+
+      receive do
+        {:DOWN, ^ref, :process, _, _} ->
+          :erlzk.close(client_pid)
+      end
+    end
+
+    spawn(pact)
+    :ok
   end
 end

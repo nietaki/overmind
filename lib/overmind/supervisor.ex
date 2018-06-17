@@ -8,7 +8,7 @@ defmodule Overmind.Supervisor do
   @impl true
   def init(_) do
     children = [
-      {Overmind.Coordinator, :child_spec_arg}
+      # {Overmind.Coordinator, :child_spec_arg}
     ]
 
     Supervisor.init(children, strategy: :rest_for_one)

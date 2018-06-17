@@ -11,6 +11,11 @@ defmodule Overmind.MixProject do
       elixirc_options: [
         warnings_as_errors: true
       ],
+      test_coverage: [tool: ExCoveralls],
+      preferred_cli_env: [
+        coveralls: :test,
+        "coveralls.html": :test
+      ],
       deps: deps(),
       docs: docs()
     ]
@@ -42,6 +47,7 @@ defmodule Overmind.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps() do
     [
+      {:uuid, "~> 1.1"},
       {:erlzk, "~> 0.6.4"},
       {:libring, "~> 1.0"},
       {:gen_state_machine, "~> 2.0"},

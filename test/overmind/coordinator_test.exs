@@ -1,6 +1,8 @@
 defmodule Overmind.CoordinatorTest do
   use ExUnit.Case
+  import Tools
 
+  alias Overmind.Coordinator
   alias Overmind.Coordinator.Cluster
   alias Overmind.Coordinator.Data
 
@@ -75,6 +77,52 @@ defmodule Overmind.CoordinatorTest do
       assert new_data.current_cluster == pending
       assert new_data.pending_cluster == nil
       assert new_data.available_nodes == nil
+    end
+  end
+
+  describe "Coordinator integration tests" do
+    setup do
+      zk_servers = [{'localhost', 2181}]
+
+      {:ok, root_client_pid} = :erlzk.connect(zk_servers, 30000, [])
+      Overmind.Utils.ensure_znode(root_client_pid, "/test_chroot")
+      test_dir = UUID.uuid4()
+      :ok = :erlzk.close(root_client_pid)
+
+      opts = [
+        chroot_path: "/test_chroot/#{test_dir}",
+        zk_servers: zk_servers
+      ]
+
+      {:ok, %{opts: opts}}
+    end
+
+    test "a clean start", %{opts: opts} do
+      {:ok, pid} = Coordinator.start_link(opts ++ [self_node: :a@foo])
+      assert is_pid(pid)
+
+      assert {:leading, data} = Coordinator.get_state_and_data(pid)
+      assert data.self_node == :a@foo
+      assert data.available_nodes == %{a@foo: -1}
+      assert is_pid(data.client_pid)
+      assert data.current_cluster == %Cluster{nodes: [], version: -1}
+      assert data.pending_cluster == %Cluster{nodes: [:a@foo], version: 1}
+      assert data.leader_node =~ "a@foo"
+    end
+
+    test "killing the coordinator kills its zk client too", %{opts: opts} do
+      {:ok, pid} = Coordinator.start(opts)
+      {_, data} = Coordinator.get_state_and_data(pid)
+      client_pid = data.client_pid
+      assert Process.alive?(pid)
+      assert Process.alive?(client_pid)
+
+      Process.exit(pid, :kill)
+      refute Process.alive?(pid)
+
+      wait_until_pass(fn ->
+        refute Process.alive?(client_pid)
+      end)
     end
   end
 end
