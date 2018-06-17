@@ -21,7 +21,8 @@ defmodule Overmind.Coordinator.ClusterTest do
       assert %Cluster{version: 15, nodes: nodes} == cluster
       assert data == Cluster.to_pending_cluster_data(cluster)
     end
-    test_case.("foo@bar,baz@ban", [:foo@bar,:baz@ban])
+
+    test_case.("foo@bar,baz@ban", [:foo@bar, :baz@ban])
     test_case.("", [])
   end
 end

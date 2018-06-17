@@ -1,20 +1,25 @@
 defmodule Overmind.Coordinator.Cluster do
   @enforce_keys [
-    :version, # integer
-    :nodes, # atom list
+    # integer
+    :version,
+    # atom list
+    :nodes
   ]
 
   defstruct @enforce_keys
 
   def new(nodes, version) when is_integer(version) do
-    nodes = Enum.map(nodes, fn
-      node when is_atom(node) ->
-        node
-      node when is_list(node) ->
-        List.to_atom(node)
-      node when is_binary(node) ->
-        String.to_atom(node)
-    end)
+    nodes =
+      Enum.map(nodes, fn
+        node when is_atom(node) ->
+          node
+
+        node when is_list(node) ->
+          List.to_atom(node)
+
+        node when is_binary(node) ->
+          String.to_atom(node)
+      end)
 
     %__MODULE__{version: version, nodes: nodes}
   end
@@ -31,6 +36,7 @@ defmodule Overmind.Coordinator.Cluster do
       nodes
       |> Enum.map(&Atom.to_string/1)
       |> Enum.join(",")
+
     "#{version}:#{nodes}"
   end
 

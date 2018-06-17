@@ -1,11 +1,16 @@
 defmodule Overmind.Utils do
   def ensure_znode(client_pid, path, data \\ "") do
     res = :erlzk.create(client_pid, path, data)
+
     case res do
-      {:ok, _path} -> res
-      {:error, :node_exists} -> res
+      {:ok, _path} ->
+        res
+
+      {:error, :node_exists} ->
+        res
+
       other ->
-        raise "unexpected result in ensure_znode: #{inspect other}"
+        raise "unexpected result in ensure_znode: #{inspect(other)}"
     end
   end
 

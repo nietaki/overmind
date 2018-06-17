@@ -40,10 +40,11 @@ defmodule Overmind.CoordinatorTest do
 
       assert {new_data, true} = Data.pending_cluster_changed(data, pending)
       assert new_data.pending_cluster == pending
+
       assert new_data.available_nodes == %{
-        bar: -1,
-        baz: -1
-      }
+               bar: -1,
+               baz: -1
+             }
     end
 
     test "updating available nodes, one by one", %{empty: empty} do
@@ -55,17 +56,18 @@ defmodule Overmind.CoordinatorTest do
       assert {new_data, false} = Data.available_node_changed(data, :bar, 4)
 
       assert new_data.available_nodes == %{
-        bar: 4,
-        baz: -1
-      }
+               bar: 4,
+               baz: -1
+             }
 
       assert {new_data, false} = Data.available_node_changed(new_data, :baz, 5)
 
       assert new_data.current_cluster == data.current_cluster
+
       assert new_data.available_nodes == %{
-        bar: 4,
-        baz: 5
-      }
+               bar: 4,
+               baz: 5
+             }
 
       # this will trigger the transition
       assert {new_data, true} = Data.available_node_changed(new_data, :bar, 5)
