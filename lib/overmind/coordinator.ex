@@ -83,6 +83,10 @@ defmodule Overmind.Coordinator do
     GenStateMachine.call(coordinator, :get_state_and_data)
   end
 
+  def node_ready(coordinator, cluster_version) do
+    GenStateMachine.cast(coordinator, {:node_ready, cluster_version})
+  end
+
   # ==========================================================================
   # Callbacks
   # ==========================================================================
@@ -213,20 +217,31 @@ defmodule Overmind.Coordinator do
         :leading,
         data
       ) do
-    {:ok, {data, _stat}} = :erlzk.get_data(data.client_pid, node_path, self())
+    {:ok, {version_string, _stat}} = :erlzk.get_data(data.client_pid, node_path, self())
 
     actions = [
-      internal({:available_node_changed, String.to_atom(node_name), String.to_integer(data)})
+      internal(
+        {:available_node_changed, String.to_atom(node_name), String.to_integer(version_string)}
+      )
     ]
 
     {:next_state, :leading, data, actions}
   end
 
-  def handle_event(:internal, {:available_node_changed, _node_atom, _version}, :leading, data) do
-    Logger.info("handling available node changed")
-    # TODO update the ready
-
+  def handle_event(:internal, {:available_node_changed, node_atom, version}, :leading, data) do
+    Logger.info("handling available node changed #{node_atom} went to #{version}")
+    {data, changed} = Data.available_node_changed(data, node_atom, version)
+    Logger.info("will broadcast: #{changed}")
+    # TODO broadcast
     {:next_state, :leading, data}
+  end
+
+  def handle_event(:cast, {:node_ready, cluster_version}, state, data)
+      when state in [:leading, :following] do
+    my_available_path = Path.join(@available_nodes, Atom.to_string(data.self_node))
+    version_string = Integer.to_string(cluster_version)
+    {:ok, _path} = :erlzk.set_data(data.client_pid, my_available_path, version_string)
+    :keep_state_and_data
   end
 
   # --------------------------------------------------------------------------

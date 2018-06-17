@@ -110,6 +110,25 @@ defmodule Overmind.CoordinatorTest do
       assert data.leader_node =~ "a@foo"
     end
 
+    test "Just one server scenario", %{opts: opts} do
+      {:ok, pid} = Coordinator.start_link(opts ++ [self_node: :a@foo])
+      assert is_pid(pid)
+
+      assert {:leading, data} = Coordinator.get_state_and_data(pid)
+      assert data.current_cluster == %Cluster{nodes: [], version: -1}
+      assert data.pending_cluster == %Cluster{nodes: [:a@foo], version: 1}
+
+      Coordinator.node_ready(pid, 1)
+
+      wait_until_pass(fn ->
+        assert {:leading, data} = Coordinator.get_state_and_data(pid)
+        assert data.current_cluster == %Cluster{nodes: [:a@foo], version: 1}
+      end)
+
+      assert {:leading, data} = Coordinator.get_state_and_data(pid)
+      assert data.pending_cluster == nil
+    end
+
     test "killing the coordinator kills its zk client too", %{opts: opts} do
       {:ok, pid} = Coordinator.start(opts)
       {_, data} = Coordinator.get_state_and_data(pid)
