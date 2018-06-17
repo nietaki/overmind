@@ -6,6 +6,9 @@ defmodule Overmind.CoordinatorTest do
   alias Overmind.Coordinator.Cluster
   alias Overmind.Coordinator.Data
 
+  @a :a@a
+  @b :b@b
+
   describe "Cluster" do
     test "constructs from current cluster data correctly" do
       test_case = fn data, nodes ->
@@ -143,6 +146,17 @@ defmodule Overmind.CoordinatorTest do
       refute_receive {:clusters_changed, _, _}
     end
 
+    test "basic 2 server scenario", %{opts: opts} do
+      _ = start_link_coordinator(opts, @a)
+      assert_receive {@a, {:clusters_changed, _, _}}
+      assert_receive {@a, {:clusters_changed, _, _}}
+      refute_receive {@a, _}
+
+      _ = start_link_coordinator(opts, @b)
+      refute_receive {@b, _}
+      # TODO continue here
+    end
+
     test "killing the coordinator kills its zk client too", %{opts: opts} do
       {:ok, pid} = Coordinator.start(opts)
       {_, data} = Coordinator.get_state_and_data(pid)
@@ -157,5 +171,21 @@ defmodule Overmind.CoordinatorTest do
         refute Process.alive?(client_pid)
       end)
     end
+  end
+
+  def start_link_coordinator(opts, name) do
+    test_process = self()
+    forwarder_pid = spawn_link(fn -> named_message_forwarder(test_process, name) end)
+    custom_opts = [self_node: name, subscribers: [forwarder_pid]]
+    {:ok, pid} = Coordinator.start_link(opts ++ custom_opts)
+    pid
+  end
+
+  defp named_message_forwarder(target, name) do
+    receive do
+      anything -> send(target, {name, anything})
+    end
+
+    named_message_forwarder(target, name)
   end
 end
