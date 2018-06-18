@@ -123,10 +123,6 @@ defmodule Overmind.CoordinatorTest do
 
       assert_receive {:clusters_changed, current, pending}
       assert current == Cluster.new([], -1)
-      assert pending == nil
-
-      assert_receive {:clusters_changed, current, pending}
-      assert current == Cluster.new([], -1)
       assert pending == Cluster.new([:a@foo], 1)
 
       refute_receive {:clusters_changed, _, _}
@@ -149,7 +145,6 @@ defmodule Overmind.CoordinatorTest do
     @tag :skip
     test "basic 2 server scenario", %{opts: opts} do
       _ = start_link_coordinator(opts, @a)
-      assert_receive {@a, {:clusters_changed, _, _}}
       assert_receive {@a, {:clusters_changed, _, _}}
       refute_receive {@a, _}
 

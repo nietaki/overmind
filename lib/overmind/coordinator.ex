@@ -155,26 +155,23 @@ defmodule Overmind.Coordinator do
       :erlzk.create(data.client_pid, my_leaders_path, :ephemeral_sequential)
 
     {:ok, leaders} = :erlzk.get_children(data.client_pid, @leaders)
-
     true = my_leader_node in leaders
-
     data = Data.set_leader_node(data, List.to_string(my_leader_node))
 
-    {:ok, {current_cluster_data, _stat}} = :erlzk.get_data(data.client_pid, @current_cluster)
-
-    current_cluster = Cluster.from_current_cluster_data(current_cluster_data)
-
-    {data, true} = Data.current_cluster_changed(data, current_cluster)
-    broadcast_cluster(data)
-
     if get_leader(leaders) == my_leader_node do
-      # leading transition
       Logger.info("I'm going to be a leader!")
+      {:ok, {current_cluster_data, _stat}} = :erlzk.get_data(data.client_pid, @current_cluster)
+
+      current_cluster = Cluster.from_current_cluster_data(current_cluster_data)
+
+      {data, true} = Data.current_cluster_changed(data, current_cluster)
       # pretending available nodes changed to bootstrap the leading state
       {:next_state, :leading, data, [info({:node_children_changed, @available_nodes})]}
     else
-      # following transition
       Logger.info("I'm going to be a follower!")
+      # TODO fetch&subscribe current and pending nodes
+      # TODO broadcast
+
       {:next_state, :following, data}
     end
   end
