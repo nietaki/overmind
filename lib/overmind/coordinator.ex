@@ -171,6 +171,19 @@ defmodule Overmind.Coordinator do
       Logger.info("I'm going to be a follower!")
       # TODO fetch&subscribe current and pending nodes
       # TODO broadcast
+      {:ok, {current_cluster_data, _stat}} =
+        :erlzk.get_data(data.client_pid, @current_cluster, self())
+
+      current_cluster = Cluster.from_current_cluster_data(current_cluster_data)
+      {data, _} = Data.current_cluster_changed(data, current_cluster)
+
+      {:ok, {pending_cluster_data, stat}} =
+        :erlzk.get_data(data.client_pid, @pending_cluster, self())
+
+      stat = ZnodeStat.new(stat)
+      pending_cluster = Cluster.from_pending_cluster_data(stat.version, pending_cluster_data)
+      {data, _} = Data.pending_cluster_changed(data, pending_cluster)
+      broadcast_cluster(data)
 
       {:next_state, :following, data}
     end
@@ -238,6 +251,8 @@ defmodule Overmind.Coordinator do
     {data, changed} = Data.available_node_changed(data, node_atom, version)
 
     if changed do
+      current_cluster_data = Cluster.to_current_cluster_data(data.current_cluster)
+      {:ok, _} = :erlzk.set_data(data.client_pid, @current_cluster, current_cluster_data)
       broadcast_cluster(data)
     end
 
@@ -250,6 +265,21 @@ defmodule Overmind.Coordinator do
     version_string = Integer.to_string(cluster_version)
     {:ok, _path} = :erlzk.set_data(data.client_pid, my_available_path, version_string)
     :keep_state_and_data
+  end
+
+  # --------------------------------------------------------------------------
+  # Following state
+  # --------------------------------------------------------------------------
+
+  def handle_event(:info, {:node_data_changed, @current_cluster}, :following, data) do
+    {:ok, {current_cluster_data, _stat}} =
+      :erlzk.get_data(data.client_pid, @current_cluster, self())
+
+    current_cluster = Cluster.from_current_cluster_data(current_cluster_data)
+    {data, true} = Data.current_cluster_changed(data, current_cluster)
+    broadcast_cluster(data)
+
+    {:next_state, :leading, data}
   end
 
   # --------------------------------------------------------------------------

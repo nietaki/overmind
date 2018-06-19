@@ -142,15 +142,41 @@ defmodule Overmind.CoordinatorTest do
       refute_receive {:clusters_changed, _, _}
     end
 
-    @tag :skip
     test "basic 2 server scenario", %{opts: opts} do
-      _ = start_link_coordinator(opts, @a)
-      assert_receive {@a, {:clusters_changed, _, _}}
+      a_pid = start_link_coordinator(opts, @a)
+      assert_receive {@a, {:clusters_changed, _, pending}}
       refute_receive {@a, _}
 
-      _ = start_link_coordinator(opts, @b)
+      assert pending.version == 1
+
+      Coordinator.node_ready(a_pid, pending.version)
+      assert_receive {@a, {:clusters_changed, _, nil}}
+      refute_receive {@a, _}
+
+      b_pid = start_link_coordinator(opts, @b)
+      assert_receive {@a, {:clusters_changed, a_cur, a_pending}}
+      refute_receive {@a, _}
+      assert_receive {@b, {:clusters_changed, b_cur, b_pending}}
       refute_receive {@b, _}
-      # TODO continue here
+
+      assert a_cur == %Cluster{nodes: [@a], version: 1}
+      assert a_pending == %Cluster{nodes: [@b, @a], version: 2}
+      assert a_cur == b_cur
+      assert a_pending == b_pending
+
+      Coordinator.node_ready(b_pid, 2)
+      refute_receive {@b, _}
+      refute_receive {@a, _}
+      Coordinator.node_ready(a_pid, 2)
+
+      prev_pending = a_pending
+
+      assert_receive {@a, {:clusters_changed, a_cur, nil}}
+      refute_receive {@a, _}
+      assert a_cur == prev_pending
+
+      assert_receive {@b, {:clusters_changed, ^a_cur, nil}}
+      refute_receive {@b, _}
     end
 
     test "killing the coordinator kills its zk client too", %{opts: opts} do
