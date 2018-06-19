@@ -1,4 +1,4 @@
-# Overmind [![travis badge](https://travis-ci.org/nietaki/overmind.svg?branch=master)](https://travis-ci.org/nietaki/overmind) ![Coverage](https://img.shields.io/coveralls/github/nietaki/overmind/master.svg)
+# Overmind [![travis badge](https://travis-ci.org/nietaki/overmind.svg?branch=master)](https://travis-ci.org/nietaki/overmind) [![Coverage](https://img.shields.io/coveralls/github/nietaki/overmind/master.svg)](https://coveralls.io/github/nietaki/overmind?branch=master)
 
 Multinode, persistent, consistent, scalable, named virtual actors.
 
