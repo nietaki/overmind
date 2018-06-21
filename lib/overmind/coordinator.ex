@@ -199,7 +199,7 @@ defmodule Overmind.Coordinator do
     {:ok, available_nodes} = :erlzk.get_children(data.client_pid, @available_nodes, self())
     available_nodes = Enum.map(available_nodes, &List.to_string/1)
     # forwarding the info to the actual handler
-    {:next_state, :leading, data, [internal({:available_nodes_changed, available_nodes})]}
+    {:keep_state, data, [internal({:available_nodes_changed, available_nodes})]}
   end
 
   def handle_event(:internal, {:available_nodes_changed, available_nodes}, :leading, data) do
@@ -226,7 +226,7 @@ defmodule Overmind.Coordinator do
         internal({:available_node_changed, available_node, String.to_integer(data)})
       end)
 
-    {:next_state, :leading, data, available_node_changed_actions}
+    {:keep_state, data, available_node_changed_actions}
   end
 
   def handle_event(
@@ -243,7 +243,7 @@ defmodule Overmind.Coordinator do
       )
     ]
 
-    {:next_state, :leading, data, actions}
+    {:keep_state, data, actions}
   end
 
   def handle_event(:internal, {:available_node_changed, node_atom, version}, :leading, data) do
@@ -256,7 +256,7 @@ defmodule Overmind.Coordinator do
       broadcast_cluster(data)
     end
 
-    {:next_state, :leading, data}
+    {:keep_state, data}
   end
 
   def handle_event(:cast, {:node_ready, cluster_version}, state, data)
@@ -279,7 +279,7 @@ defmodule Overmind.Coordinator do
     {data, true} = Data.current_cluster_changed(data, current_cluster)
     broadcast_cluster(data)
 
-    {:next_state, :leading, data}
+    {:keep_state, data}
   end
 
   # --------------------------------------------------------------------------

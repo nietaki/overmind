@@ -1,7 +1,10 @@
 defmodule Overmind.Coordinator.Data do
   alias Overmind.Coordinator.Cluster
+  alias __MODULE__, as: This
 
-  @type t :: %__MODULE__{}
+  require Logger
+
+  @type t :: %This{}
 
   defstruct [
     # atom
@@ -21,17 +24,17 @@ defmodule Overmind.Coordinator.Data do
   ]
 
   def new() do
-    %__MODULE__{
+    %This{
       subscribers: []
     }
   end
 
   def set_leader_node(data, leader_node) when is_binary(leader_node) do
-    %__MODULE__{data | leader_node: leader_node}
+    %This{data | leader_node: leader_node}
   end
 
-  def current_cluster_changed(%__MODULE__{} = data, %Cluster{} = cluster) do
-    %__MODULE__{
+  def current_cluster_changed(%This{} = data, %Cluster{} = cluster) do
+    %This{
       data
       | current_cluster: cluster,
         pending_cluster: nil,
@@ -40,13 +43,13 @@ defmodule Overmind.Coordinator.Data do
     |> changed(true)
   end
 
-  def pending_cluster_changed(%__MODULE__{} = data, %Cluster{} = cluster) do
+  def pending_cluster_changed(%This{} = data, %Cluster{} = cluster) do
     readiness =
       cluster.nodes
       |> Enum.map(&{&1, -1})
       |> Map.new()
 
-    %__MODULE__{
+    %This{
       data
       | pending_cluster: cluster,
         available_nodes: readiness
@@ -54,31 +57,45 @@ defmodule Overmind.Coordinator.Data do
     |> changed(true)
   end
 
-  def available_node_changed(%__MODULE__{} = data, node, node_readiness_version) do
-    false = data.pending_cluster == nil
+  # def available_node_changed(
+  #       data = %This{current_cluster: %Cluster{version: cur_version}},
+  #       _node,
+  #       ready_version
+  #     )
+  #     when ready_version >= cur_version do
+  #   changed(data, false)
+  # end
+  #
+  # def available_node_changed(data = %This{pending_cluster: nil}, node, version) do
+  #   Logger.error("unexpected available node changed event #{inspect {node, version}} at #{inspect data}")
+  #   changed(data, false)
+  # end
 
-    new_available =
-      data.available_nodes
-      |> Map.update!(node, &max(&1, node_readiness_version))
-
-    if Enum.all?(new_available, fn {_n, version} -> version >= data.pending_cluster.version end) do
-      %__MODULE__{
-        data
-        | current_cluster: data.pending_cluster,
-          pending_cluster: nil,
-          available_nodes: nil
-      }
-      |> changed(true)
+  def available_node_changed(%This{} = data, node, node_readiness_version) do
+    if data.pending_cluster == nil do
+      changed(data, false)
     else
-      %__MODULE__{
-        data
-        | available_nodes: new_available
-      }
-      |> changed(false)
+      new_available =
+        data.available_nodes
+        |> Map.update!(node, &max(&1, node_readiness_version))
+
+      data = %This{data | available_nodes: new_available}
+
+      if Enum.all?(new_available, fn {_n, version} -> version >= data.pending_cluster.version end) do
+        %This{
+          data
+          | current_cluster: data.pending_cluster,
+            pending_cluster: nil,
+            available_nodes: nil
+        }
+        |> changed(true)
+      else
+        changed(data, false)
+      end
     end
   end
 
-  def stable?(%__MODULE__{pending_cluster: pending_cluster}) do
+  def stable?(%This{pending_cluster: pending_cluster}) do
     pending_cluster == nil
   end
 

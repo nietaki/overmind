@@ -80,6 +80,9 @@ defmodule Overmind.CoordinatorTest do
       assert new_data.current_cluster == pending
       assert new_data.pending_cluster == nil
       assert new_data.available_nodes == nil
+
+      # a "repeated" message is not a problem
+      assert {new_data, false} == Data.available_node_changed(new_data, :bar, 5)
     end
   end
 
@@ -179,6 +182,31 @@ defmodule Overmind.CoordinatorTest do
       refute_receive {@b, _}
     end
 
+    # WIP
+    @tag :skip
+    test "leader disconnecting", %{opts: opts} do
+      a_pid = start_nolink_coordinator(opts, @a)
+      Coordinator.node_ready(a_pid, 1)
+      # Process.sleep(100)
+
+      b_pid = start_link_coordinator(opts, @b)
+      assert_receive {@b, _}
+      Coordinator.node_ready(b_pid, 2)
+      Coordinator.node_ready(a_pid, 2)
+      IO.inspect(flush())
+
+      assert {:leading, a_data} = Coordinator.get_state_and_data(a_pid)
+      assert a_data.current_cluster == Cluster.new([@b, @a], 2)
+      assert a_data.pending_cluster == nil
+      assert {:following, b_data} = Coordinator.get_state_and_data(b_pid)
+      assert b_data.current_cluster == a_data.current_cluster
+      assert b_data.pending_cluster == a_data.pending_cluster
+
+      Process.exit(a_pid, :kill)
+      # TODO continue here - the follower becoming the leader
+      assert_receive {@b, _msg}
+    end
+
     test "killing the coordinator kills its zk client too", %{opts: opts} do
       {:ok, pid} = Coordinator.start(opts)
       {_, data} = Coordinator.get_state_and_data(pid)
@@ -203,11 +231,28 @@ defmodule Overmind.CoordinatorTest do
     pid
   end
 
+  def start_nolink_coordinator(opts, name) do
+    test_process = self()
+    forwarder_pid = spawn(fn -> named_message_forwarder(test_process, name) end)
+    custom_opts = [self_node: name, subscribers: [forwarder_pid]]
+    {:ok, pid} = Coordinator.start(opts ++ custom_opts)
+    pid
+  end
+
   defp named_message_forwarder(target, name) do
     receive do
       anything -> send(target, {name, anything})
     end
 
     named_message_forwarder(target, name)
+  end
+
+  def flush(acc \\ []) when is_list(acc) do
+    receive do
+      msg -> flush([msg | acc])
+    after
+      20 ->
+        Enum.reverse(acc)
+    end
   end
 end
